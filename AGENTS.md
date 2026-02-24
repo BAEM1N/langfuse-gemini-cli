@@ -52,18 +52,31 @@ cp langfuse_hook.py ~/.gemini/hooks/langfuse_hook.py
 chmod +x ~/.gemini/hooks/langfuse_hook.py
 ```
 
-### Step 4: Configure settings.json
+### Step 4: Write Credentials to .env
+
+Write the credentials to `~/.gemini/.env` (user-level, NOT in settings.json):
+
+```bash
+cat > ~/.gemini/.env <<EOF
+# Langfuse credentials for langfuse-gemini-cli
+# Environment variables and settings.json env take priority over .env values.
+
+TRACE_TO_LANGFUSE=true
+LANGFUSE_PUBLIC_KEY=<from interview>
+LANGFUSE_SECRET_KEY=<from interview>
+LANGFUSE_BASE_URL=<from interview>
+LANGFUSE_USER_ID=<from interview>
+EOF
+```
+
+### Step 5: Configure settings.json
 
 Read the existing `~/.gemini/settings.json` first, then merge (do NOT overwrite existing settings):
 
-**Add to `env`** (preserve existing env vars):
+**Add to `env`** (only the enable flag; credentials are in .env):
 ```json
 {
-  "TRACE_TO_LANGFUSE": "true",
-  "LANGFUSE_PUBLIC_KEY": "<from interview>",
-  "LANGFUSE_SECRET_KEY": "<from interview>",
-  "LANGFUSE_BASE_URL": "<from interview>",
-  "LANGFUSE_USER_ID": "<from interview>"
+  "TRACE_TO_LANGFUSE": "true"
 }
 ```
 
@@ -84,11 +97,14 @@ Read the existing `~/.gemini/settings.json` first, then merge (do NOT overwrite 
 }
 ```
 
-### Step 5: Verify
+### Step 6: Verify
 
 ```bash
 # Check hook file exists
 ls -la ~/.gemini/hooks/langfuse_hook.py
+
+# Check .env file exists
+ls -la ~/.gemini/.env
 
 # Check langfuse import works
 python3 -c "import langfuse; print('OK')"
@@ -97,14 +113,24 @@ python3 -c "import langfuse; print('OK')"
 echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py
 ```
 
-### Step 6: Inform User
+### Step 7: Inform User
 
 Tell the user:
 - Restart Gemini CLI to activate the hooks
 - Dashboard: the LANGFUSE_BASE_URL they provided
+- Credentials: `~/.gemini/.env`
 - Logs: `~/.gemini/state/langfuse_hook.log`
-- Debug mode: set `GC_LANGFUSE_DEBUG` to `"true"` in env
-- Disable: set `TRACE_TO_LANGFUSE` to `"false"` in env
+- Debug mode: set `GC_LANGFUSE_DEBUG` to `"true"` in .env or settings.json env
+- Disable: set `TRACE_TO_LANGFUSE` to `"false"` in settings.json env
+
+## Configuration Hierarchy
+
+Priority (highest first):
+1. **Environment variables** (system-level)
+2. **settings.json `env` section** (project-level config)
+3. **~/.gemini/.env** (user-level credentials)
+
+Credentials go in `.env`, hook registration and feature flags go in `settings.json`.
 
 ## Architecture
 
@@ -129,7 +155,8 @@ Hook Events Flow:
 |------|------|---------|
 | Hook script (source) | `./langfuse_hook.py` | Main hook implementation |
 | Hook script (installed) | `~/.gemini/hooks/langfuse_hook.py` | Active hook |
-| Settings | `~/.gemini/settings.json` | Hook registration + env vars |
+| Credentials | `~/.gemini/.env` | Langfuse API keys (user-level) |
+| Settings | `~/.gemini/settings.json` | Hook registration + feature flags |
 | State | `~/.gemini/state/langfuse_state.json` | Turn count tracking |
 | Buffer | `~/.gemini/state/langfuse_buffer_*.jsonl` | Event accumulation per session |
 | Log | `~/.gemini/state/langfuse_hook.log` | Hook execution log |
@@ -152,7 +179,7 @@ Hook Events Flow:
 
 ## Troubleshooting
 
-- **No traces**: Check `TRACE_TO_LANGFUSE=true` and API keys are correct
+- **No traces**: Check `TRACE_TO_LANGFUSE=true` and API keys in `~/.gemini/.env`
 - **Hook not firing**: Verify hooks are in settings.json under all 11 event keys
 - **Import error**: Run `python3 -m pip install langfuse`
 - **Buffer not clearing**: Check `~/.gemini/state/` for stale buffer files
