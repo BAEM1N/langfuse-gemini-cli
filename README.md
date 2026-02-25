@@ -4,6 +4,16 @@
 
 Automatic [Langfuse](https://langfuse.com) tracing for [Gemini CLI](https://github.com/google-gemini/gemini-cli). Every agent turn, LLM call, tool execution, and session event is captured as structured traces in your Langfuse dashboard -- zero code changes required.
 
+## Status (February 25, 2026)
+
+- ✅ Hook pipeline verified on real Gemini CLI sessions
+- ✅ Session lifecycle, turn traces, tool spans, and buffer flow validated
+- ✅ LGC (`langfuse-gemini-cli`) aligned with companion repos:
+  - `langfuse-oh-my-codex`
+  - `langfuse-claude-code`
+  - `langfuse-opencode`
+- Progress docs: [English](./PROGRESS.md) | [한국어](./PROGRESS.ko.md)
+
 ## Features
 
 - **Full event coverage** -- all 11 Gemini CLI hook events are captured

@@ -328,6 +328,7 @@ class TraceData:
     tool_selections: List[Dict[str, Any]] = field(default_factory=list)
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     events: List[Dict[str, Any]] = field(default_factory=list)
+    raw_events: List[Dict[str, Any]] = field(default_factory=list)
 
 def build_trace_from_buffer(buffer_events: List[Dict[str, Any]], payload: Dict[str, Any]) -> TraceData:
     """Assemble buffer events into structured trace data."""
@@ -338,16 +339,17 @@ def build_trace_from_buffer(buffer_events: List[Dict[str, Any]], payload: Dict[s
     # Pair BeforeTool/AfterTool by matching tool_name + sequential order
     before_tools: List[Dict[str, Any]] = []
 
-    for ev in buffer_events:
+    for seq, ev in enumerate(buffer_events, start=1):
         event_name = ev.get("event", "")
         data = ev.get("data", {})
         ts = ev.get("timestamp", "")
+        td.raw_events.append({"seq": seq, "event": event_name, "timestamp": ts, "data": data})
 
         if event_name == "BeforeAgent":
-            td.before_agent = {"timestamp": ts, **data}
+            td.before_agent = {"seq": seq, "timestamp": ts, **data}
 
         elif event_name == "BeforeModel":
-            td.model_calls.append({"phase": "before", "timestamp": ts, **data})
+            td.model_calls.append({"seq": seq, "phase": "before", "timestamp": ts, **data})
 
         elif event_name == "AfterModel":
             # Try to pair with the most recent BeforeModel
@@ -355,6 +357,7 @@ def build_trace_from_buffer(buffer_events: List[Dict[str, Any]], payload: Dict[s
             for mc in reversed(td.model_calls):
                 if mc.get("phase") == "before" and "after_timestamp" not in mc:
                     mc["phase"] = "paired"
+                    mc["after_seq"] = seq
                     mc["after_timestamp"] = ts
                     mc["llm_response"] = data.get("llm_response")
                     if "llm_request" not in mc and "llm_request" in data:
@@ -362,34 +365,38 @@ def build_trace_from_buffer(buffer_events: List[Dict[str, Any]], payload: Dict[s
                     paired = True
                     break
             if not paired:
-                td.model_calls.append({"phase": "after_only", "timestamp": ts, **data})
+                td.model_calls.append({"seq": seq, "phase": "after_only", "timestamp": ts, **data})
 
         elif event_name == "BeforeToolSelection":
-            td.tool_selections.append({"timestamp": ts, **data})
+            td.tool_selections.append({"seq": seq, "timestamp": ts, **data})
 
         elif event_name == "BeforeTool":
-            before_tools.append({"timestamp": ts, **data})
+            before_tools.append({"seq": seq, "timestamp": ts, **data})
 
         elif event_name == "AfterTool":
-            tool_entry: Dict[str, Any] = {"timestamp": ts, **data}
+            tool_entry: Dict[str, Any] = {"seq": seq, "timestamp": ts, **data}
             # Pair with matching BeforeTool
             for bt in reversed(before_tools):
                 if bt.get("tool_name") == data.get("tool_name") and "paired" not in bt:
                     bt["paired"] = True
+                    tool_entry["before_seq"] = bt["seq"]
                     tool_entry["before_timestamp"] = bt["timestamp"]
                     tool_entry["before_input"] = bt.get("tool_input")
+                    tool_entry["before_mcp_context"] = bt.get("mcp_context")
                     break
             td.tool_calls.append(tool_entry)
 
         else:
-            td.events.append({"event": event_name, "timestamp": ts, **data})
+            td.events.append({"seq": seq, "event": event_name, "timestamp": ts, **data})
 
     # Add unpaired BeforeTools as standalone entries
     for bt in before_tools:
         if "paired" not in bt:
             td.tool_calls.append({
+                "seq": bt.get("seq"),
                 "tool_name": bt.get("tool_name", "unknown"),
                 "tool_input": bt.get("tool_input"),
+                "mcp_context": bt.get("mcp_context"),
                 "timestamp": bt["timestamp"],
                 "unpaired_before": True,
             })
@@ -420,7 +427,36 @@ def extract_gemini_usage(llm_response: Any) -> Optional[Dict[str, int]]:
     cached = usage.get("cachedContentTokenCount", 0)
     if cached:
         result["input_cache_read"] = cached
+    reasoning = usage.get("thoughtsTokenCount", 0) or usage.get("reasoningTokenCount", 0)
+    if reasoning:
+        result["reasoning"] = reasoning
     return result if result else None
+
+
+def extract_gemini_usage_details(llm_response: Any) -> Optional[Dict[str, int]]:
+    """Return normalized usage details with raw Gemini counters."""
+    if not isinstance(llm_response, dict):
+        return None
+    usage = llm_response.get("usageMetadata")
+    if not isinstance(usage, dict):
+        return None
+
+    details: Dict[str, int] = {}
+    for key, val in usage.items():
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, int):
+            details[key] = val
+            continue
+        if isinstance(val, float):
+            details[key] = int(val)
+            continue
+        if isinstance(val, str):
+            try:
+                details[key] = int(float(val))
+            except Exception:
+                continue
+    return details if details else None
 
 def extract_gemini_model(llm_request: Any) -> str:
     """Extract model name from Gemini API request."""
@@ -463,13 +499,21 @@ def emit_turn_trace(
 
     trace_meta: Dict[str, Any] = {
         "source": "gemini-cli",
+        "product": "gemini-cli",
+        "reconstruction": "hook-buffer-assembly",
         "session_id": session_id,
         "turn_number": turn_num,
         "cwd": ctx.cwd,
         "hostname": hostname,
+        "hook_event": ctx.hook_event_name,
+        "event_timestamp": ctx.timestamp,
         "model_calls": len(trace_data.model_calls),
         "tool_calls": len(trace_data.tool_calls),
         "tool_selections": len(trace_data.tool_selections),
+        "raw_event_count": len(trace_data.raw_events),
+        "event_sequence": [
+            f"{ev.get('seq')}:{ev.get('event')}" for ev in trace_data.raw_events[:80]
+        ],
         "prompt_meta": prompt_meta,
         "response_meta": response_meta,
     }
@@ -520,15 +564,19 @@ def _emit_turn_modern(
                 model_name = extract_gemini_model(mc.get("llm_request"))
                 llm_response = mc.get("llm_response")
                 usage = extract_gemini_usage(llm_response)
+                usage_details = extract_gemini_usage_details(llm_response)
 
                 req_str, req_meta = safe_str(mc.get("llm_request"))
                 resp_text = extract_gemini_response_text(llm_response)
                 resp_str, resp_meta = safe_str(resp_text) if resp_text else safe_str(llm_response)
 
                 gen_meta: Dict[str, Any] = {
+                    "seq": mc.get("seq"),
+                    "after_seq": mc.get("after_seq"),
                     "phase": mc.get("phase", "unknown"),
                     "request_meta": req_meta,
                     "response_meta": resp_meta,
+                    "usage_details": usage_details,
                 }
 
                 with langfuse.start_as_current_observation(
@@ -542,6 +590,11 @@ def _emit_turn_modern(
                     gen_obs.update(start_time=t_cursor)
                     if usage:
                         gen_obs.update(usage=usage)
+                    if usage_details:
+                        try:
+                            gen_obs.update(usage_details=usage_details)
+                        except Exception:
+                            pass
                 t_cursor += step
 
             # Tool selections
@@ -551,7 +604,12 @@ def _emit_turn_modern(
                 with langfuse.start_as_current_span(
                     name=f"Tool Selection [{i + 1}]",
                     input={"request": ts_str},
-                    metadata={"event": "BeforeToolSelection", "timestamp": ts_data.get("timestamp"), "input_meta": ts_meta},
+                    metadata={
+                        "event": "BeforeToolSelection",
+                        "seq": ts_data.get("seq"),
+                        "timestamp": ts_data.get("timestamp"),
+                        "input_meta": ts_meta,
+                    },
                 ) as span:
                     span.update(start_time=t_cursor)
                 t_cursor += step
@@ -562,14 +620,20 @@ def _emit_turn_modern(
                 tool_name = tc.get("tool_name", "unknown")
                 tool_input = tc.get("tool_input") or tc.get("before_input")
                 tool_response = tc.get("tool_response")
+                mcp_context = tc.get("mcp_context") or tc.get("before_mcp_context")
 
                 in_str, in_meta = safe_str(tool_input)
                 out_str, out_meta = safe_str(tool_response)
+                mcp_ctx_str, mcp_ctx_meta = safe_str(mcp_context)
 
                 tool_meta: Dict[str, Any] = {
+                    "seq": tc.get("seq"),
+                    "before_seq": tc.get("before_seq"),
                     "tool_name": tool_name,
                     "input_meta": in_meta,
                     "output_meta": out_meta,
+                    "mcp_context": mcp_ctx_str if mcp_ctx_str else None,
+                    "mcp_context_meta": mcp_ctx_meta,
                     "before_timestamp": tc.get("before_timestamp"),
                     "after_timestamp": tc.get("timestamp"),
                 }
@@ -583,6 +647,23 @@ def _emit_turn_modern(
                     metadata=tool_meta,
                 ) as tool_obs:
                     tool_obs.update(start_time=t_cursor, output=out_str)
+                t_cursor += step
+
+            # Other buffered events not represented above
+            for i, ev in enumerate(trace_data.events):
+                time.sleep(0.002)
+                ev_str, ev_meta = safe_str(ev)
+                with langfuse.start_as_current_span(
+                    name=f"Hook Event [{i + 1}]: {ev.get('event', 'unknown')}",
+                    input=None,
+                    metadata={
+                        "event": ev.get("event"),
+                        "seq": ev.get("seq"),
+                        "timestamp": ev.get("timestamp"),
+                        "event_meta": ev_meta,
+                    },
+                ) as span:
+                    span.update(start_time=t_cursor, output=ev_str)
                 t_cursor += step
 
             # Agent Response
@@ -642,15 +723,19 @@ def _emit_turn_legacy(
             model_name = extract_gemini_model(mc.get("llm_request"))
             llm_response = mc.get("llm_response")
             usage = extract_gemini_usage(llm_response)
+            usage_details = extract_gemini_usage_details(llm_response)
 
             req_str, req_meta = safe_str(mc.get("llm_request"))
             resp_text_mc = extract_gemini_response_text(llm_response)
             resp_str, resp_meta = safe_str(resp_text_mc) if resp_text_mc else safe_str(llm_response)
 
             gen_meta: Dict[str, Any] = {
+                "seq": mc.get("seq"),
+                "after_seq": mc.get("after_seq"),
                 "phase": mc.get("phase", "unknown"),
                 "request_meta": req_meta,
                 "response_meta": resp_meta,
+                "usage_details": usage_details,
             }
 
             with langfuse.start_as_current_observation(
@@ -664,6 +749,11 @@ def _emit_turn_legacy(
                 gen_obs.update(start_time=t_cursor)
                 if usage:
                     gen_obs.update(usage_details=usage)
+                if usage_details:
+                    try:
+                        gen_obs.update(usage_details=usage_details)
+                    except Exception:
+                        pass
             t_cursor += step
 
         # Tool selections
@@ -673,7 +763,12 @@ def _emit_turn_legacy(
             with langfuse.start_as_current_span(
                 name=f"Tool Selection [{i + 1}]",
                 input={"request": ts_str},
-                metadata={"event": "BeforeToolSelection", "timestamp": ts_data.get("timestamp"), "input_meta": ts_meta},
+                metadata={
+                    "event": "BeforeToolSelection",
+                    "seq": ts_data.get("seq"),
+                    "timestamp": ts_data.get("timestamp"),
+                    "input_meta": ts_meta,
+                },
             ) as span:
                 span.update(start_time=t_cursor)
             t_cursor += step
@@ -684,14 +779,20 @@ def _emit_turn_legacy(
             tool_name = tc.get("tool_name", "unknown")
             tool_input = tc.get("tool_input") or tc.get("before_input")
             tool_response = tc.get("tool_response")
+            mcp_context = tc.get("mcp_context") or tc.get("before_mcp_context")
 
             in_str, in_meta = safe_str(tool_input)
             out_str, out_meta = safe_str(tool_response)
+            mcp_ctx_str, mcp_ctx_meta = safe_str(mcp_context)
 
             tool_meta: Dict[str, Any] = {
+                "seq": tc.get("seq"),
+                "before_seq": tc.get("before_seq"),
                 "tool_name": tool_name,
                 "input_meta": in_meta,
                 "output_meta": out_meta,
+                "mcp_context": mcp_ctx_str if mcp_ctx_str else None,
+                "mcp_context_meta": mcp_ctx_meta,
                 "before_timestamp": tc.get("before_timestamp"),
                 "after_timestamp": tc.get("timestamp"),
             }
@@ -703,6 +804,22 @@ def _emit_turn_legacy(
                 metadata=tool_meta,
             ) as tool_obs:
                 tool_obs.update(start_time=t_cursor, output=out_str)
+            t_cursor += step
+
+        for i, ev in enumerate(trace_data.events):
+            time.sleep(0.002)
+            ev_str, ev_meta = safe_str(ev)
+            with langfuse.start_as_current_span(
+                name=f"Hook Event [{i + 1}]: {ev.get('event', 'unknown')}",
+                input=None,
+                metadata={
+                    "event": ev.get("event"),
+                    "seq": ev.get("seq"),
+                    "timestamp": ev.get("timestamp"),
+                    "event_meta": ev_meta,
+                },
+            ) as span:
+                span.update(start_time=t_cursor, output=ev_str)
             t_cursor += step
 
         # Agent Response
@@ -731,6 +848,8 @@ def emit_event(
 
     meta: Dict[str, Any] = {
         "source": "gemini-cli",
+        "product": "gemini-cli",
+        "reconstruction": "hook-direct-event",
         "session_id": session_id,
         "event": event_name,
         "cwd": ctx.cwd,
@@ -777,23 +896,31 @@ def handle_buffer_event(payload: Dict[str, Any], session_hash: str) -> int:
     timestamp = payload.get("timestamp", datetime.now(timezone.utc).isoformat())
 
     # Extract event-specific data
-    data: Dict[str, Any] = {}
+    data: Dict[str, Any] = {
+        "event_payload_keys": sorted(payload.keys()),
+        "cwd": payload.get("cwd"),
+        "transcript_path": payload.get("transcript_path"),
+    }
     if event == "BeforeAgent":
         data["prompt"] = payload.get("prompt")
+        data["prompt_meta"] = payload.get("prompt_meta")
     elif event in ("BeforeModel", "BeforeToolSelection"):
         data["llm_request"] = payload.get("llm_request")
     elif event == "AfterModel":
         data["llm_request"] = payload.get("llm_request")
         data["llm_response"] = payload.get("llm_response")
+        data["prompt_response"] = payload.get("prompt_response")
     elif event == "BeforeTool":
         data["tool_name"] = payload.get("tool_name")
         data["tool_input"] = payload.get("tool_input")
         data["mcp_context"] = payload.get("mcp_context")
+        data["tool_id"] = payload.get("tool_id")
     elif event == "AfterTool":
         data["tool_name"] = payload.get("tool_name")
         data["tool_input"] = payload.get("tool_input")
         data["tool_response"] = payload.get("tool_response")
         data["mcp_context"] = payload.get("mcp_context")
+        data["tool_id"] = payload.get("tool_id")
 
     append_to_buffer(session_hash, event, timestamp, data)
     debug(f"Buffered {event} for session {session_hash}")
@@ -922,6 +1049,9 @@ def main() -> int:
     ctx = extract_session_context(payload)
     event = ctx.hook_event_name or ""
     session_id = ctx.session_id or ""
+
+    # Log every received event for diagnostics
+    info(f"Received event={event} session={session_id[:8] if session_id else 'none'} keys={sorted(payload.keys())}")
 
     if not session_id:
         debug("Missing session_id; exiting.")

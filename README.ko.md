@@ -4,6 +4,16 @@
 
 [Gemini CLI](https://github.com/google-gemini/gemini-cli)의 대화를 [Langfuse](https://langfuse.com)에 자동으로 트레이싱합니다. 에이전트 턴, LLM 호출, 도구 실행, 세션 이벤트 등 모든 과정이 Langfuse 대시보드에 구조화된 트레이스로 기록됩니다 -- 코드 변경 없이 작동합니다.
 
+## 상태 (2026년 2월 25일)
+
+- ✅ 실제 Gemini CLI 세션 기준 훅 파이프라인 검증 완료
+- ✅ 세션 라이프사이클/턴/도구 스팬/버퍼 흐름 검증 완료
+- ✅ 다음 연동 저장소와 정렬 완료:
+  - `langfuse-oh-my-codex`
+  - `langfuse-claude-code`
+  - `langfuse-opencode`
+- 진행 문서: [English](./PROGRESS.md) | [한국어](./PROGRESS.ko.md)
+
 ## 주요 기능
 
 - **전체 이벤트 커버리지** -- Gemini CLI의 11개 hook 이벤트 전체 캡처
