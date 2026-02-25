@@ -8,6 +8,8 @@ Automatic [Langfuse](https://langfuse.com) tracing for [Gemini CLI](https://gith
 
 - ✅ Hook pipeline verified on real Gemini CLI sessions
 - ✅ Session lifecycle, turn traces, tool spans, and buffer flow validated
+- ✅ Repository cleanup completed (no unnecessary tracked files found)
+- ✅ `v0.0.1` release/tag refreshed with final docs sync
 - ✅ LGC (`langfuse-gemini-cli`) aligned with companion repos:
   - `langfuse-oh-my-codex`
   - `langfuse-claude-code`
