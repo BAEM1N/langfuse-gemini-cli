@@ -35,7 +35,7 @@ Automatic [Langfuse](https://langfuse.com) tracing for [Gemini CLI](https://gith
 ## Prerequisites
 
 - **Gemini CLI** -- installed and working (`gemini --version` to verify)
-- **Python 3.8+** -- with `pip` available (`python3 -m pip --version` to verify)
+- **Python 3.8+** -- with `pip` available (`python3 -m pip --version` or `python -m pip --version` to verify)
 - **Langfuse account** -- [cloud.langfuse.com](https://cloud.langfuse.com) (free tier available) or a self-hosted instance
 
 ## Quick Start
@@ -224,7 +224,7 @@ All `LANGFUSE_*` variables also accept a `GC_LANGFUSE_*` prefix (which takes pri
 
 1. Confirm hooks are in `~/.gemini/settings.json` under all 11 event keys
 2. Verify the Python path in the command is correct (`python3` vs `python`)
-3. Test manually: `echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py`
+3. Test manually: `echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py` (use `python` instead of `python3` on Windows)
 
 ### Duplicate traces
 

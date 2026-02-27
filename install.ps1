@@ -25,7 +25,7 @@ Write-Host ""
 # ── 1. Python check ──
 Step "Checking Python..."
 $py = $null
-foreach ($cmd in @("python3", "python")) {
+foreach ($cmd in @("python", "python3")) {
     try { & $cmd --version 2>$null | Out-Null; $py = $cmd; break } catch {}
 }
 if (-not $py) { Err "Python 3.8+ not found."; exit 1 }

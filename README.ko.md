@@ -35,7 +35,7 @@
 ## 사전 요구사항
 
 - **Gemini CLI** -- 설치 및 동작 확인 (`gemini --version`으로 확인)
-- **Python 3.8+** -- `pip` 사용 가능 (`python3 -m pip --version`으로 확인)
+- **Python 3.8+** -- `pip` 사용 가능 (`python3 -m pip --version` 또는 `python -m pip --version`으로 확인)
 - **Langfuse 계정** -- [cloud.langfuse.com](https://cloud.langfuse.com) (무료 티어 사용 가능) 또는 셀프 호스팅 인스턴스
 
 ## 빠른 시작
@@ -232,7 +232,7 @@ chmod +x ~/.gemini/hooks/langfuse_hook.py
 
 1. `~/.gemini/settings.json`에 11개 이벤트 키 모두에 hook이 등록되었는지 확인
 2. 명령어의 Python 경로가 올바른지 확인 (`python3` vs `python`)
-3. 수동 테스트: `echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py`
+3. 수동 테스트: `echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py` (Windows에서는 `python3` 대신 `python` 사용)
 
 ### 중복 트레이스
 

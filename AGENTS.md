@@ -14,21 +14,21 @@ When a user asks to set up this project, follow these steps:
 
 ```bash
 # Python 3.8+
-python3 --version
+python3 --version   # or `python --version` on Windows
 
 # pip available
-python3 -m pip --version
+python3 -m pip --version   # or `python -m pip --version` on Windows
 
 # Gemini CLI installed
 gemini --version
 
 # langfuse SDK
-python3 -c "import langfuse; print(langfuse.__version__)" 2>/dev/null || echo "Not installed"
+python3 -c "import langfuse; print(langfuse.__version__)" 2>/dev/null || python -c "import langfuse; print(langfuse.__version__)" 2>/dev/null || echo "Not installed"
 ```
 
 If langfuse is not installed:
 ```bash
-python3 -m pip install --upgrade langfuse
+python3 -m pip install --upgrade langfuse   # or `python -m pip install ...` on Windows
 ```
 
 ### Step 2: Interview User for Langfuse Credentials
@@ -107,10 +107,10 @@ ls -la ~/.gemini/hooks/langfuse_hook.py
 ls -la ~/.gemini/.env
 
 # Check langfuse import works
-python3 -c "import langfuse; print('OK')"
+python3 -c "import langfuse; print('OK')" || python -c "import langfuse; print('OK')"
 
 # Dry-run test (should output {"decision": "allow"} and exit)
-echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py
+echo '{"hook_event_name":"SessionStart","session_id":"test"}' | python3 ~/.gemini/hooks/langfuse_hook.py   # or `python` on Windows
 ```
 
 ### Step 7: Inform User
@@ -181,6 +181,6 @@ Hook Events Flow:
 
 - **No traces**: Check `TRACE_TO_LANGFUSE=true` and API keys in `~/.gemini/.env`
 - **Hook not firing**: Verify hooks are in settings.json under all 11 event keys
-- **Import error**: Run `python3 -m pip install langfuse`
+- **Import error**: Run `python3 -m pip install langfuse` (or `python -m pip install langfuse` on Windows)
 - **Buffer not clearing**: Check `~/.gemini/state/` for stale buffer files
 - **Gemini CLI version**: Hooks require v0.26.0+ (`gemini --version`)
